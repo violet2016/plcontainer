@@ -520,7 +520,8 @@ HTAB *load_runtime_configuration() {
 	{
 		doc = xmlReadFile(filename, NULL, 0);
 		if (doc == NULL) {
-			plc_elog(ERROR, "Error: could not parse file %s, wrongly formatted XML or missing configuration file\n", filename);
+			hash_destroy(table);
+			plc_elog(WARNING, "Error: could not parse file %s, wrongly formatted XML or missing configuration file\n", filename);
 			return NULL;
 		}
 
@@ -531,6 +532,7 @@ HTAB *load_runtime_configuration() {
 		if (doc != NULL) {
 			xmlFreeDoc(doc);
 		}
+		// TODO: release table entry
 		hash_destroy(table);
 		PG_RE_THROW();
 	}

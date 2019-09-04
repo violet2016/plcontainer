@@ -120,7 +120,7 @@ plc_initialize_coordinator()
     if (plc_refresh_container_config(false) != 0) {
         if (runtime_conf_table == NULL) {
             /* can't load runtime configuration */
-            plc_elog(ERROR, "PL/container: can't load runtime configuration");
+            plc_elog(WARNING, "PL/container: can't load runtime configuration");
         } else {
             plc_elog(WARNING, "PL/container: there is no runtime configuration");
         }

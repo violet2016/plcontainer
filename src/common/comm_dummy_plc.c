@@ -8,6 +8,7 @@ extern void plc_elog(int log_level, const char *format, ...) pg_attribute_printf
 void plc_elog(int log_level, const char *format, ...)
 {
 	StringInfoData buf;
+	initStringInfo(&buf);
 	appendStringInfo(&buf, "plcontainer log: ");
 	for(;;) {
 		va_list args;
