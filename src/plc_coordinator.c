@@ -42,6 +42,7 @@
 #include "plc/plc_configuration.h"
 #include "plc/plc_coordinator.h"
 #include "common/comm_shm.h"
+#include "common/messages/messages.h"
 
 PG_MODULE_MAGIC;
 // PROTOTYPE:
@@ -56,6 +57,10 @@ static volatile sig_atomic_t got_sighup = false;
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 
 CoordinatorStruct *coordinator_shm;
+
+#define RECEIVE_BUF_SIZE 2048
+#define TIMEOUT_SEC 3
+char* receiveBuffer = NULL;
 
 static void
 plc_coordinator_shmem_startup(void)
@@ -136,8 +141,62 @@ plc_initialize_coordinator()
     auxWorker.bgw_notify_pid = 0;
     snprintf(auxWorker.bgw_name, sizeof(auxWorker.bgw_name), "plcoordinator_aux");
     RegisterDynamicBackgroundWorker(&auxWorker, NULL);
-
+    receiveBuffer = palloc(RECEIVE_BUF_SIZE);
+    if (!receiveBuffer)
+    {
+        plc_elog(ERROR, "failed allocating memory in coordinator\n");
+    }
     return sock;
+}
+
+static void process_msg_from_sock(int sock, void *ptr, size_t len)
+{
+    char msg_type;
+    (void) ptr;
+    ssize_t sz = 0;
+    struct sockaddr_un remote;
+    size_t len_addr = sizeof(struct sockaddr_un);
+    int s2 = accept(sock, &remote, &len_addr);
+    if (s2 < 0) {
+        return;
+    }
+    if ((sz=recv(s2, &msg_type, 1, 0)) < 0)
+    {
+        plc_elog(INFO, "Failed to recv data: %s", strerror(errno));
+        return;
+    }
+
+    switch (msg_type) {
+        case MT_PLCID:
+            plcMsgPLCId* mplc_id = palloc(sizeof(plcMsgPLCId));
+            recv(s2, &mplc_id->sessionid, sizeof(plcMsgPLCId)- sizeof(plcMessage), 0);
+            plc_elog(DEBUG1, "receive id msg from process %d", mplc_id->pid);
+            // TODO: add create container function
+            break;
+        default:
+            break;
+    }
+    if (shutdown(s2, 2) < 0)
+    {
+        plc_elog(ERROR, "error in shutdown uds");
+    }
+    close(s2);
+}
+static int wait_for_msg(int sock) {
+    struct timeval timeout;
+    int rv;
+    fd_set fdset;
+
+    FD_ZERO(&fdset);    /* clear the set */
+    FD_SET(sock, &fdset); /* add our file descriptor to the set */
+    timeout.tv_sec = TIMEOUT_SEC;
+    timeout.tv_usec = 0;
+
+    rv = select(sock + 1, &fdset, NULL, NULL, &timeout);
+    if (rv == -1) {
+        plc_elog(ERROR, "Failed to select() socket: %s", strerror(errno));
+    }
+    return rv;
 }
 void
 plc_coordinator_main(Datum datum)
@@ -151,9 +210,13 @@ plc_coordinator_main(Datum datum)
 
     coordinator_shm->state = CO_STATE_READY;
     plc_elog(INFO, "plcoordinator is going to enter main loop, sock=%d", sock);
+    //struct sockaddr_in cli_addr;
+    //socklen_t addrlen = sizeof(cli_addr);
     while(!got_sigterm) {
-        /* TODO: add network code */
-
+        if (wait_for_msg(sock) > 0)
+        {
+            process_msg_from_sock(sock, receiveBuffer, RECEIVE_BUF_SIZE);
+        }
         rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
         if (rc & WL_POSTMASTER_DEATH)
             break;
