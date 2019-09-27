@@ -15,6 +15,7 @@
 #define PLC_BUFFER_MIN_FREE 200
 #define PLC_INPUT_BUFFER 0
 #define PLC_OUTPUT_BUFFER 1
+#define DEFAULT_STRING_BUFFER_SIZE 1024
 
 typedef struct plcBuffer {
 	char *data;

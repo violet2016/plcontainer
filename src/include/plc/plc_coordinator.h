@@ -22,4 +22,5 @@ typedef struct ContainerEntry
 	char            containerId[16];    /* for container */
 	pid_t           stand_alone_pid;    /* for stand alone mode */
 } ContainerEntry;
+
 #endif /* _CO_COORDINATOR_H */

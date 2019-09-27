@@ -7,7 +7,7 @@ EXTENSION = plc_coordinator
 SRCDIR = ./
 FILES = plc_coordinator.c containers.c message_fns.c plc_configuration.c \
         plc_docker_api.c plcontainer_udfs.c sqlhandler.c function_cache.c \
-        plc_backend_api.c plc_typeio.c subtransaction_handler.c \
+        plc_typeio.c subtransaction_handler.c \
         common/base_network.c common/comm_channel.c common/comm_connectivity.c \
         common/comm_dummy_plc.c common/comm_messages.c
 OBJS = $(foreach src,$(FILES),$(subst .c,.o,$(src)))

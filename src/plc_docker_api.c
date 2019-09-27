@@ -204,7 +204,7 @@ cleanup:
 	return buffer;
 }
 
-int plc_docker_create_container(runtimeConfEntry *conf, char **name, int container_id, char **uds_dir) {
+int plc_docker_create_container(runtimeConfEntry *conf, char **name, char **uds_dir, pid_t qe_pid, int session_id, int ccnt) {
 	char *createRequest =
 		"{\n"
 			"    \"AttachStdin\": false,\n"
@@ -214,8 +214,6 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 			"    \"Cmd\": [\"%s\"],\n"
 			"    \"Env\": [\"EXECUTOR_UID=%d\",\n"
 			"              \"EXECUTOR_GID=%d\",\n"
-			"              \"DB_USER_NAME=%s\",\n"
-			"              \"DB_NAME=%s\",\n"
 			"              \"DB_QE_PID=%d\",\n"
 			"              \"USE_CONTAINER_NETWORK=%s\"],\n"
 			"    \"NetworkDisabled\": %s,\n"
@@ -229,26 +227,20 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 			"        \"LogConfig\":{\"Type\": \"%s\"}\n"
 			"    },\n"
 			"    \"Labels\": {\n"
-			"        \"owner\": \"%s\",\n"
-			"        \"dbid\": \"%d\"\n"
+			"        \"qepid\": \"%d\",\n"
+			"        \"sessionid\": \"%d\",\n"
+			"        \"ccnt\": \"%d\"\n"
 			"    }\n"
 			"}\n";
-	bool has_error;
-	char *volumeShare = get_sharing_options(conf, container_id, &has_error, uds_dir);
+	bool has_error = false;
+	char *volumeShare = get_sharing_options(conf, &has_error, uds_dir);
 
 	char *messageBody = NULL;
 	plcCurlBuffer *response = NULL;
 	int res = 0;
 	int createStringSize = 0;
 	
-	const char *username;
-	const char *dbname;
 	char cgroupParent[RES_GROUP_PATH_MAX_LENGTH] = "";
-
-	int16 dbid = 0;
-#ifndef PLC_PG
-	dbid = GpIdentity.dbid;
-#endif
 
 	/*
 	 *  no shared volumes should not be treated as an error, so we use has_error to
@@ -257,11 +249,6 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 	if (has_error == true) {
 		return -1;
 	}
-	
-	username = GetUserNameFromId(GetUserId());
-	dbname = MyProcPort->database_name;
-
-
 	/*
 	 * We run container processes with the uid/gid of user "nobody" on host.
 	 * We might want to allow to use uid/gid set in runtimeConfEntry but since
@@ -283,9 +270,7 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 		snprintf(cgroupParent,RES_GROUP_PATH_MAX_LENGTH,"/gpdb/%d",conf->resgroupOid);
 	}
 	/* Get Docket API "create" call JSON message body */
-	createStringSize = 100 + strlen(createRequest) + strlen(conf->command)
-	                   + strlen(conf->image) + strlen(volumeShare) + strlen(username) * 2
-	                   + strlen(dbname);
+	createStringSize = 100 + strlen(createRequest) + strlen(conf->command) + strlen(conf->image) + strlen(volumeShare);
 	messageBody = (char *) palloc(createStringSize * sizeof(char));
 	snprintf(messageBody,
 	         createStringSize,
@@ -295,8 +280,6 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 	         conf->command,
 	         getuid(),
 	         getgid(),
-	         username,
-	         dbname,
 	         MyProcPid,
 	         conf->useContainerNetwork ? "true" : "false",
 	         conf->useContainerNetwork ? "false" : "true",
@@ -306,8 +289,9 @@ int plc_docker_create_container(runtimeConfEntry *conf, char **name, int contain
 	         ((long long) conf->memoryMb) * 1024 * 1024,
 			 ((long long) conf->cpuShare),
 	         conf->useContainerLogging ? default_log_dirver : "none",
-	         username,
-	         dbid);
+			 qe_pid,
+			 session_id,
+			 ccnt);
 
 	/* Make a call */
 	response = plcCurlRESTAPICall(PLC_HTTP_POST, "/containers/create", messageBody);

@@ -491,9 +491,9 @@ static void release_runtime_configuration_table(HTAB *table) {
 HTAB *load_runtime_configuration() {
 	xmlDoc* volatile doc = NULL;
 	HTAB *table;
-	char filename[1024];
+	char filename[DEFAULT_STRING_BUFFER_SIZE];
  #ifdef PLC_PG
-    char data_directory[1024];
+    char data_directory[DEFAULT_STRING_BUFFER_SIZE];
 	char *env_str;
  #endif  
 	table = new_runtime_configuration_table();
@@ -631,7 +631,7 @@ runtimeConfEntry *plc_get_runtime_configuration(char *runtime_id) {
 	return entry;
 }
 
-char *get_sharing_options(runtimeConfEntry *conf, int container_slot, bool *has_error, char **uds_dir) {
+char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_dir) {
 	char *res = NULL;
 
 	*has_error = false;
@@ -675,23 +675,9 @@ char *get_sharing_options(runtimeConfEntry *conf, int container_slot, bool *has_
 			if (i > 0)
 				comma = ',';
 			
-			gpdb_dir_sz = strlen(IPC_GPDB_BASE_DIR) + 1 + 16 + 1 + 16 + 1 + 4 + 1;
-			*uds_dir = palloc(gpdb_dir_sz);
-			sprintf(*uds_dir, "%s.%d.%d.%d", IPC_GPDB_BASE_DIR, getpid(), domain_socket_no++, container_slot);
-			volumes[i] = palloc(10 + gpdb_dir_sz + strlen(IPC_CLIENT_DIR));
+			volumes[i] = palloc(10 + strlen(uds_dir) + strlen(IPC_CLIENT_DIR));
 			sprintf(volumes[i], " %c\"%s:%s:rw\"", comma, *uds_dir, IPC_CLIENT_DIR);
 			totallen += strlen(volumes[i]);
-
-			/* Create the directory. */
-			if (mkdir(*uds_dir, S_IRWXU) < 0 && errno != EEXIST) {
-				plc_elog(WARNING, "Cannot create directory %s: %s", *uds_dir, strerror(errno));
-				*has_error = true;
-				for (j = 0; j <= i ;j++) {
-					pfree(volumes[i]);
-				}
-				pfree(volumes);
-				return NULL;
-			}
 		}
 
 		res = palloc(totallen + conf->nSharedDirs + 1 + 1);

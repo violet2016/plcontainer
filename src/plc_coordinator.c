@@ -407,13 +407,12 @@ static int start_container(const char *runtimeid, pid_t qe_pid, int session_id, 
 	QeRequest *request;
 	int res;
 
-	(void) runtimeid;
-	*uds_address = (char*) palloc(1024);
-	snprintf(*uds_address, 1024, "%s.%d.%d.%d.%d", DEBUG_UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
+	*uds_address = (char*) palloc(DEFAULT_STRING_BUFFER_SIZE);
 
 	/* debug test only, we need to store the container info in coordinator */
 	if (plcontainer_stand_alone_mode)
 	{
+		snprintf(*uds_address, DEFAULT_STRING_BUFFER_SIZE, "%s.%d.%d.%d.%d", DEBUG_UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
 		server_pid = start_stand_alone_process(*uds_address);
 		ContainerKey key;
 		key.conn = session_id;
@@ -421,6 +420,21 @@ static int start_container(const char *runtimeid, pid_t qe_pid, int session_id, 
 		store_container_info(&key, server_pid, NULL);
 		return 0;
 	} else {
+		runtimeConfEntry *runtime_entry = plc_get_runtime_configuration(runtimeid);
+		char *docker_name = NULL;
+		char *uds_dir = palloc(DEFAULT_STRING_BUFFER_SIZE);
+		sprintf(uds_dir,  "%s.%d.%d.%d.%d", UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
+		snprintf(*uds_address, DEFAULT_STRING_BUFFER_SIZE, "%s/%s", uds_dir, UDS_SHARED_FILE);
+		res = plc_docker_create_container(runtime_entry, &docker_name, &uds_dir, qe_pid, session_id, ccnt);
+		if (res != 0) {
+			elog(WARNING, "create container failed");
+			return -1;
+		}
+		res = plc_docker_start_container(docker_name);
+		if (res != 0) {
+			elog(WARNING, "start container failed");
+			return -1;
+		}
 		request = (QeRequest*) palloc (sizeof(QeRequest));
 		request->pid = qe_pid;
 		request->conn = session_id;

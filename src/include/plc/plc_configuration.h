@@ -70,7 +70,7 @@ bool plc_check_user_privilege(char *users);
 
 int plc_refresh_container_config(bool verbose);
 
-char *get_sharing_options(runtimeConfEntry *conf, int container_slot, bool *has_error, char **uds_dir);
+char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_dir);
 
 extern HTAB *runtime_conf_table;
 

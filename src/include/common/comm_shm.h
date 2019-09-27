@@ -101,5 +101,5 @@ extern bool plcontainer_debug_mode;
 extern char *plcontainer_debug_server_path;
 
 #define DEBUG_UDS_PREFIX "/tmp/plconatiner.debug"
-
+#define UDS_PREFIX "/tmp/plcontainer"
 #endif /* _CO_SHM_H */
