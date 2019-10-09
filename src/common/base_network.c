@@ -94,6 +94,7 @@ int ListenUnix(const char *network, const char *address)
         plc_elog(ERROR, "unknown network(%s)", network);
         return -1;
     }
+    sotype = sotype | SOCK_NONBLOCK;
     if (strlen(address) >= sizeof(sockaddr.sun_path)) {
         plc_elog(ERROR, "address is too long(%d)", (int)strlen(address));
         return -1;

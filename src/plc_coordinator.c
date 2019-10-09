@@ -89,7 +89,6 @@ plc_coordinator_shmem_startup(void)
     bool found;
     if (prev_shmem_startup_hook)
         prev_shmem_startup_hook();
-    // TODO: do shared memory initialization
     coordinator_shm = ShmemInitStruct(CO_SHM_KEY, MAXALIGN(sizeof(CoordinatorStruct)), &found);
     Assert(!found);
     coordinator_shm->state = CO_STATE_UNINITIALIZED;
@@ -121,14 +120,22 @@ init_runtime_info_table() {
 static void
 plc_coordinator_sigterm(pg_attribute_unused() SIGNAL_ARGS)
 {
+    int save_errno = errno;
     got_sigterm = true;
+    SetLatch(&MyProc->procLatch);
+    errno = save_errno;
 }
 
 static void
 plc_coordinator_sighup(pg_attribute_unused() SIGNAL_ARGS)
 {
+    int save_errno = errno;
+
     got_sighup = true;
+    SetLatch(&MyProc->procLatch);
+    errno = save_errno;
 }
+
 
 static int
 plc_listen_socket()
@@ -193,7 +200,6 @@ static void process_msg_from_sock(int sock)
 	 * it will be sent back to gpdb.
 	 */
 	plcMsgContainer *container_msg;
-
     socklen_t len_addr = (socklen_t) sizeof(struct sockaddr_un);
     int s2 = accept(sock, &remote, &len_addr);
     if (s2 < 0) {
@@ -267,18 +273,17 @@ plc_coordinator_main(Datum datum)
 			elog(ERROR, "Failed to init container status hash table");
 		}
 	}
-    while(!got_sigterm) {
-        if (wait_for_msg(sock) > 0)
-        {
-            process_msg_from_sock(sock);
-        }
-
-        rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
-        if (rc & WL_POSTMASTER_DEATH)
-            break;
+    while (!got_sigterm) {
         ResetLatch(&MyProc->procLatch);
         if (got_sighup) {
             got_sighup = false;
+        }
+        rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
+        if (rc & WL_POSTMASTER_DEATH)
+            break;
+
+        if (wait_for_msg(sock) > 0) {
+            process_msg_from_sock(sock);
         }
     }
 
@@ -307,10 +312,10 @@ plc_coordinator_aux_main(Datum datum)
     BackgroundWorkerUnblockSignals();
     // TODO: impl coordinator logic here
     while(!got_sigterm) {
+        ResetLatch(&MyProc->procLatch);
         rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
         if (rc & WL_POSTMASTER_DEATH)
             break;
-        ResetLatch(&MyProc->procLatch);
 		receive_message();
 		sleep(2);
     }
