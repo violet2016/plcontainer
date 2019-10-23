@@ -650,10 +650,10 @@ char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_di
 			if (i > 0)
 				comma = ',';
 			if (conf->sharedDirs[i].mode == PLC_ACCESS_READONLY) {
-				sprintf(volumes[i], " %c\"%s:%s:ro\"", comma, conf->sharedDirs[i].host,
+				snprintf(volumes[i], " %c\"%s:%s:ro\"", comma, conf->sharedDirs[i].host,
 				        conf->sharedDirs[i].container);
 			} else if (conf->sharedDirs[i].mode == PLC_ACCESS_READWRITE) {
-				sprintf(volumes[i], " %c\"%s:%s:rw\"", comma, conf->sharedDirs[i].host,
+				snprintf(volumes[i], " %c\"%s:%s:rw\"", comma, conf->sharedDirs[i].host,
 				        conf->sharedDirs[i].container);
 			} else {
 				plc_elog(WARNING, "PL/container: BUG, if runtimeConfEntry is verified, it can't be here");
@@ -673,9 +673,9 @@ char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_di
 
 			if (i > 0)
 				comma = ',';
-			
-			volumes[i] = palloc(10 + strlen(uds_dir) + strlen(IPC_CLIENT_DIR));
-			sprintf(volumes[i], " %c\"%s:%s:rw\"", comma, *uds_dir, IPC_CLIENT_DIR);
+
+			volumes[i] = palloc(10 + strlen(*uds_dir) + strlen(IPC_CLIENT_DIR));
+			snprintf(volumes[i], " %c\"%s:%s:rw\"", comma, *uds_dir, IPC_CLIENT_DIR);
 			totallen += strlen(volumes[i]);
 		}
 

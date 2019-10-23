@@ -444,6 +444,10 @@ static int start_container(const char *runtimeid, pid_t qe_pid, int session_id, 
 		return 0;
 	} else {
 		runtimeConfEntry *runtime_entry = plc_get_runtime_configuration(runtimeid);
+		if (runtime_entry == NULL) {
+			elog(WARNING, "Cannot find runtime configuration %s", runtimeid);
+			return -1;
+		}
 		char *docker_name = NULL;
 		char *uds_dir = palloc(DEFAULT_STRING_BUFFER_SIZE);
 		sprintf(uds_dir,  "%s.%d.%d.%d.%d", UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
@@ -533,7 +537,7 @@ static int receive_message()
 
 	if (res == SHM_MQ_WOULD_BLOCK)
 	{
-		elog(LOG, "PLC coordinator: no message received, wait for next trun");
+		elog(LOG, "PLC coordinator: no message received, wait for next turn");
 		return 0;
 	} else if (res == SHM_MQ_SUCCESS) {
 		if (nbytes == sizeof(QeRequest))
