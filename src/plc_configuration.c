@@ -634,7 +634,7 @@ char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_di
 	char *res = NULL;
 
 	*has_error = false;
-
+	int volume_size = 0;
 	if (conf->nSharedDirs >= 0) {
 		char **volumes = NULL;
 		int totallen = 0;
@@ -645,15 +645,16 @@ char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_di
 
 		volumes = palloc((conf->nSharedDirs + 1) * sizeof(char *));
 		for (i = 0; i < conf->nSharedDirs; i++) {
-			volumes[i] = palloc(10 + strlen(conf->sharedDirs[i].host) +
-			                    strlen(conf->sharedDirs[i].container));
+			volume_size = 10 + strlen(conf->sharedDirs[i].host) +
+			                    strlen(conf->sharedDirs[i].container);
+			volumes[i] = palloc(volume_size);
 			if (i > 0)
 				comma = ',';
 			if (conf->sharedDirs[i].mode == PLC_ACCESS_READONLY) {
-				snprintf(volumes[i], " %c\"%s:%s:ro\"", comma, conf->sharedDirs[i].host,
+				snprintf(volumes[i], volume_size, " %c\"%s:%s:ro\"", comma, conf->sharedDirs[i].host,
 				        conf->sharedDirs[i].container);
 			} else if (conf->sharedDirs[i].mode == PLC_ACCESS_READWRITE) {
-				snprintf(volumes[i], " %c\"%s:%s:rw\"", comma, conf->sharedDirs[i].host,
+				snprintf(volumes[i], volume_size, " %c\"%s:%s:rw\"", comma, conf->sharedDirs[i].host,
 				        conf->sharedDirs[i].container);
 			} else {
 				plc_elog(WARNING, "PL/container: BUG, if runtimeConfEntry is verified, it can't be here");
@@ -673,9 +674,9 @@ char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_di
 
 			if (i > 0)
 				comma = ',';
-
-			volumes[i] = palloc(10 + strlen(*uds_dir) + strlen(IPC_CLIENT_DIR));
-			snprintf(volumes[i], " %c\"%s:%s:rw\"", comma, *uds_dir, IPC_CLIENT_DIR);
+			volume_size = 10 + strlen(*uds_dir) + strlen(IPC_CLIENT_DIR);
+			volumes[i] = palloc(volume_size);
+			snprintf(volumes[i], volume_size, " %c\"%s:%s:rw\"", comma, *uds_dir, IPC_CLIENT_DIR);
 			totallen += strlen(volumes[i]);
 		}
 
