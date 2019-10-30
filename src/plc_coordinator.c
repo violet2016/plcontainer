@@ -286,6 +286,9 @@ plc_coordinator_main(Datum datum)
         if (wait_for_msg(sock) > 0) {
             process_msg_from_sock(sock);
         }
+        if (plcontainer_stand_alone_mode) {
+            update_containers_status();
+        }
     }
 
     if (coordinator_shm->protocol != CO_PROTO_TCP)
@@ -570,14 +573,22 @@ static int update_containers_status()
     ContainerKey **entry_array = palloc(entry_num * sizeof(ContainerKey *));
 
 	while ((container_entry = (ContainerEntry *) hash_seq_search(&scan)) != NULL) {
-		res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
-        if (res < 0) {
-            entry_array[i++] = &(container_entry->key);
+        if (!plcontainer_stand_alone_mode) {
+            res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
+            if (res < 0) {
+                entry_array[i++] = &(container_entry->key);
+            }
+            if (strcmp(container_entry->status, "exited") == 0) {
+                plc_docker_delete_container(container_entry->containerId);
+                entry_array[i++] = &(container_entry->key);
+            }
+        } else {
+            //debug mode qe_pid exited
+            if (kill(container_entry->key.qe_pid, 0) != 0) {
+                destroy_container(container_entry->key.qe_pid, container_entry->key.conn, container_entry->key.ccnt);
+                entry_array[i++] = &(container_entry->key);
+            }
         }
-		if (strcmp(container_entry->status, "exited") == 0) {
-			plc_docker_delete_container(container_entry->containerId);
-			entry_array[i++] = &(container_entry->key);
-		}
 		// check if pid is not exist?
 	}
 	for (int j = 0; j < i; j++) {
