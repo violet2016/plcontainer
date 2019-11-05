@@ -103,7 +103,7 @@ static plcContext *get_new_container_ctx(const char *runtime_id)
 	plcContextInit(ctx);
 
 	res = get_new_container_from_coordinator(runtime_id, ctx);
-    sleep(2);
+    sleep(10);
 	if (res != 0){
 		/* TODO: Using errors instead of elog */
 		elog(ERROR, "Cannot find an available container");

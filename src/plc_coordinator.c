@@ -542,7 +542,6 @@ static int receive_message()
 
 	if (res == SHM_MQ_WOULD_BLOCK)
 	{
-		elog(LOG, "PLC coordinator: no message received, wait for next turn");
 		return 0;
 	} else if (res == SHM_MQ_SUCCESS) {
 		if (nbytes == sizeof(QeRequest))
@@ -577,19 +576,21 @@ static int update_containers_status()
             res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
             if (res < 0) {
                 entry_array[i++] = &(container_entry->key);
+                elog(LOG, "Failed to inspect container");
+                continue;
             }
-            if (strcmp(container_entry->status, "exited") == 0) {
+            int res = kill(container_entry->key.qe_pid, 0);
+            if (res != 0 || strcmp(container_entry->status, "exited") == 0) {
+                elog(LOG, "delete container of session pid %d", container_entry->key.qe_pid);
                 plc_docker_delete_container(container_entry->containerId);
                 entry_array[i++] = &(container_entry->key);
             }
         } else {
-            //debug mode qe_pid exited
             if (kill(container_entry->key.qe_pid, 0) != 0) {
                 destroy_container(container_entry->key.qe_pid, container_entry->key.conn, container_entry->key.ccnt);
                 entry_array[i++] = &(container_entry->key);
             }
         }
-		// check if pid is not exist?
 	}
 	for (int j = 0; j < i; j++) {
 		res = hash_search(container_status_table, entry_array[j], HASH_REMOVE, NULL);

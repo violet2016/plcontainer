@@ -56,7 +56,7 @@ bool PLContainerClient::isSetOf(const plcTypeInfo *type) {
 
 
 PlcDataType PLContainerClient::GetDataType(const plcTypeInfo *type) {
-    PlcDataType ret;
+    PlcDataType ret = UNKNOWN;
     switch (type->type) {
     case PLC_DATA_INT1:
         ret = LOGICAL;
@@ -210,10 +210,10 @@ void PLContainerClient::InitCallRequest(const FunctionCallInfo fcinfo, const plc
     }
 }
 Datum PLContainerClient::GetCallResponseAsDatum(const FunctionCallInfo fcinfo, plcProcInfo *proc, const ScalarData &response) {
-    Datum retresult;
+    Datum retresult = (Datum)0;
 
     if (response.isnull()) {
-        return (Datum)0;
+        return retresult;
     }
 
     fcinfo->isnull = false;

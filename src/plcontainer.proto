@@ -25,6 +25,7 @@ enum PlcDataType {
     COMPOSITE = 5;
     ARRAY = 6;
     SETOF = 7;
+    UNKNOWN = 100;
 }
 
 message ScalarData {
