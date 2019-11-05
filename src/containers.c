@@ -44,7 +44,7 @@ typedef struct {
 } container_t;
 
 #define MAX_CONTAINER_NUMBER 10
-
+#define MAX_ADDRESS_LENGTH 128
 static container_t containers[MAX_CONTAINER_NUMBER];
 static int containers_size = 0;
 static CoordinatorStruct *coordinator_shm;
@@ -101,7 +101,7 @@ static plcContext *get_new_container_ctx(const char *runtime_id)
 	/* TODO: the initialize refactor? */
 	ctx = (plcContext*) top_palloc(sizeof(plcContext));
 	plcContextInit(ctx);
-
+	ctx->service_address = (char *)top_palloc(MAX_ADDRESS_LENGTH);
 	res = get_new_container_from_coordinator(runtime_id, ctx);
     sleep(10);
 	if (res != 0){
@@ -160,7 +160,7 @@ static int get_new_container_from_coordinator(const char *runtime_id, plcContext
 		plc_elog(ERROR, "Could not create new connection, reason %s", mContainer->msg);
 		return -1;
 	} else {
-		ctx->service_address = mContainer->msg;
+		strncpy(ctx->service_address, mContainer->msg, MAX_ADDRESS_LENGTH);
 	}
 
 	pfree(mplc_id);

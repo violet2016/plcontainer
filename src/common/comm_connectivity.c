@@ -423,5 +423,6 @@ void plcFreeContext(plcContext *ctx)
 {
 	close(ctx->conn.sock);
 	plcReleaseContext(ctx);
+	pfree(ctx->service_address);
 	pfree(ctx);
 }
