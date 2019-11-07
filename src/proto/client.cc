@@ -417,6 +417,9 @@ int get_new_container_from_coordinator(const char *runtime_id, plcContext *ctx) 
     request.set_session_id(gp_session_id);
     request.set_command_count(gp_command_count);
     client.StartContainer(request, response);
+    if (response.status() != 0) {
+        return -1;
+    }
     ctx->service_address = plc_top_strdup(response.container_address().c_str());
     return 0;
 }
