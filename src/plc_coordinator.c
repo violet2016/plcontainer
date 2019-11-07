@@ -388,11 +388,6 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 			elog(WARNING, "create container failed");
 			return -1;
 		}
-		res = plc_docker_start_container(docker_name);
-		if (res != 0) {
-			elog(WARNING, "start container failed");
-			return -1;
-		}
 		request = (QeRequest*) palloc (sizeof(QeRequest));
 		request->pid = qe_pid;
 		request->conn = session_id;
@@ -404,11 +399,15 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 		if (res != 0)
 		{
 			elog(WARNING, "send start server message failure");
-			return -1;
 		} else {
 			elog(LOG, "send start server message success");
-			return 0;
 		}
+		res = plc_docker_start_container(docker_name);
+		if (res != 0) {
+			elog(WARNING, "start container failed");
+			return -1;
+		}
+		return 0;
 	}
 }
 
