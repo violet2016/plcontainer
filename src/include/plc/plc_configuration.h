@@ -62,7 +62,7 @@ Datum refresh_plcontainer_config(PG_FUNCTION_ARGS);
 
 Datum show_plcontainer_config(PG_FUNCTION_ARGS);
 
-runtimeConfEntry *plc_get_runtime_configuration(char *id);
+runtimeConfEntry *plc_get_runtime_configuration(const char *id);
 
 HTAB *load_runtime_configuration(void);
 

@@ -133,7 +133,7 @@ void AsyncServer::ProcessRequest(int timeout_seconds) {
             static_cast<Call*>(tag)->Proceed(ok);
             continue;
         } else if (status == CompletionQueue::TIMEOUT) {
-            plc_elog(LOG, "aserver got timeout event, return to caller, ok:%d", ok);
+            plc_elog(DEBUG1, "aserver got timeout event, return to caller, ok:%d", ok);
             break;
         } else if (status == CompletionQueue::SHUTDOWN) {
             plc_elog(LOG, "server got shutdown event, return to caller, ok:%d", ok);

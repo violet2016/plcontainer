@@ -609,7 +609,7 @@ show_plcontainer_config(pg_attribute_unused() PG_FUNCTION_ARGS) {
 	}
 }
 
-runtimeConfEntry *plc_get_runtime_configuration(char *runtime_id) {
+runtimeConfEntry *plc_get_runtime_configuration(const char *runtime_id) {
 	int res = 0;
 	runtimeConfEntry *entry = NULL;
 

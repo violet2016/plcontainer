@@ -64,12 +64,15 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 CoordinatorStruct *coordinator_shm;
 #define RECEIVE_BUF_SIZE 2048
 #define TIMEOUT_SEC 3
+#define MAX_START_RETRY 5
+#define INSPECT_DOCKER_AT_ROUNT 5
 /* meesage queue */
 shm_mq_handle *message_queue_handle;
 ShmqBufferStatus *message_queue_status;
-
+CoordinatorConstraint *coordinator_docker_constraint;
 /* debug use only */
 bool plcontainer_stand_alone_mode = true;
+int plc_max_docker_creating_num = 3;
 char *plcontainer_stand_alone_server_path;
 
 
@@ -79,7 +82,7 @@ static int handle_request(QeRequest *req);
 static int start_stand_alone_process(const char* uds_address);
 static void shm_message_queue_receiver_init(dsm_segment *seg);
 static dsm_handle shm_message_queue_sender_init();
-static int update_containers_status();
+static int update_containers_status(bool inspect);
 
 HTAB *container_status_table;
 
@@ -150,6 +153,7 @@ plc_initialize_coordinator(dsm_handle seg)
     char address[1024] = {0};
     snprintf(address, sizeof(address), "/tmp/.plcoordinator.%ld.unix.sock", (long)getpid());
     coordinator_shm->protocol = CO_PROTO_UNIX;
+	coordinator_docker_constraint = (CoordinatorConstraint*) top_palloc(sizeof(CoordinatorConstraint));
     strcpy(coordinator_shm->address, address);
 
 	if (plc_refresh_container_config(false) != 0) {
@@ -213,7 +217,7 @@ plc_coordinator_main(Datum datum)
         }
 
         if (plcontainer_stand_alone_mode) {
-            update_containers_status();
+            update_containers_status(false);
         }
     }
 
@@ -240,7 +244,8 @@ plc_coordinator_aux_main(Datum datum)
 	seg = dsm_attach(DatumGetUInt32(datum));
 	shm_message_queue_receiver_init(seg);
     BackgroundWorkerUnblockSignals();
-    // TODO: impl coordinator logic here
+	bool inspect = false;
+	int round_count = 0;
     while(!got_sigterm) {
         ResetLatch(&MyProc->procLatch);
         rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
@@ -248,9 +253,17 @@ plc_coordinator_aux_main(Datum datum)
             break;
         receive_message();
         if (!plcontainer_stand_alone_mode) {
-            update_containers_status();
+			if (round_count % INSPECT_DOCKER_AT_ROUNT == 0)
+			{
+				inspect = true;
+				round_count = 0;
+			} else {
+				inspect = false;
+			}
+            update_containers_status(inspect);
         }
         sleep(2);
+		round_count++;
     }
 
     proc_exit(0);
@@ -291,7 +304,16 @@ _PG_init(void)
 							   NULL,
 							   NULL,
 							   NULL);
-
+	DefineCustomIntVariable("plcontainer.max_creating_docker_num",
+							"The max number of creating dockers at the same time",
+							NULL,
+							&plc_max_docker_creating_num,
+							3, 1, 10,
+							PGC_SIGHUP,
+							0,
+							NULL,
+							NULL,
+							NULL);
     worker.bgw_flags = BGWORKER_SHMEM_ACCESS;
     worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
     worker.bgw_restart_time = BGW_DEFAULT_RESTART_INTERVAL;
@@ -316,7 +338,8 @@ static int store_container_info(ContainerKey *key, pid_t server_pid, char* conta
 			elog(LOG, "previous server process exist %d", entry->stand_alone_pid);
 		}
 		if (entry->containerId[0] != '\0') {
-			elog(LOG, "previous container Id exist %s", entry->containerId);
+			elog(LOG, "previous container Id exist %s, will delete it", entry->containerId);
+			plc_docker_delete_container(entry->containerId);
 		}
 	}
 	entry->stand_alone_pid = server_pid;
@@ -353,24 +376,75 @@ static int clear_container_info(ContainerKey *key)
 	return res;
 }
 
+int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **docker_name, char *uds_dir)
+{
+	int res = 0;
+	SpinLockAcquire(&coordinator_docker_constraint->mutex);
+	if (coordinator_docker_constraint->dockerCreating < plc_max_docker_creating_num) {
+		coordinator_docker_constraint->dockerCreating++;
+	} else {
+		SpinLockRelease(&coordinator_docker_constraint->mutex);
+		elog(WARNING, "Too many dockers are creating now, retry later");
+		return -1;
+	}
+	SpinLockRelease(&coordinator_docker_constraint->mutex);
+	res = plc_docker_create_container(runtime_entry, docker_name, &uds_dir, key->qe_pid, key->conn, key->ccnt);
+
+	if (res != 0) {
+		elog(WARNING, "create container failed");
+		SpinLockAcquire(&coordinator_docker_constraint->mutex);
+		coordinator_docker_constraint->dockerCreating--;
+		SpinLockRelease(&coordinator_docker_constraint->mutex);
+		return -1;
+	}
+	QeRequest *request = (QeRequest*) palloc (sizeof(QeRequest));
+	request->pid = key->qe_pid;
+	request->conn = key->conn;
+	request->ccnt = key->ccnt;
+	request->requestType = CREATE_SERVER;
+	request->server_pid = 0;
+	snprintf(request->containerId, sizeof(request->containerId), "%s", *docker_name);
+	res = send_message(request);
+	if (res != 0)
+	{
+		elog(WARNING, "send start server message failure");
+	} else {
+		elog(LOG, "send start server message success");
+	}
+	SpinLockAcquire(&coordinator_docker_constraint->mutex);
+	coordinator_docker_constraint->dockerCreating--;
+	SpinLockRelease(&coordinator_docker_constraint->mutex);
+	return res;
+}
+
+int run_container(char *docker_name)
+{
+	int res = 0;
+
+	res = plc_docker_start_container(docker_name);
+	if (res != 0) {
+		elog(WARNING, "start container failed");
+		return -1;
+	}
+	return 0;
+}
 int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccnt, char **uds_address)
 {
 	pid_t server_pid;
-	QeRequest *request;
 	int res;
+	char *docker_name = NULL;
 
 	*uds_address = (char*) palloc(DEFAULT_STRING_BUFFER_SIZE);
-	
-	
+	ContainerKey key;
+	key.conn = session_id;
+	key.qe_pid = qe_pid;
+	key.ccnt = ccnt;
+
 	/* debug test only, we need to store the container info in coordinator */
 	if (plcontainer_stand_alone_mode)
 	{
 		snprintf(*uds_address, DEFAULT_STRING_BUFFER_SIZE, "%s.%d.%d.%d.%d", DEBUG_UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
 		server_pid = start_stand_alone_process(*uds_address);
-		ContainerKey key;
-		key.conn = session_id;
-		key.qe_pid = qe_pid;
-		key.ccnt = ccnt;
 		store_container_info(&key, server_pid, NULL);
 		return 0;
 	} else {
@@ -379,35 +453,26 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 			elog(WARNING, "Cannot find runtime configuration %s", runtimeid);
 			return -1;
 		}
-		char *docker_name = NULL;
 		char *uds_dir = palloc(DEFAULT_STRING_BUFFER_SIZE);
 		sprintf(uds_dir,  "%s.%d.%d.%d.%d", UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
 		snprintf(*uds_address, DEFAULT_STRING_BUFFER_SIZE, "%s/%s", uds_dir, UDS_SHARED_FILE);
-		res = plc_docker_create_container(runtime_entry, &docker_name, &uds_dir, qe_pid, session_id, ccnt);
-		if (res != 0) {
-			elog(WARNING, "create container failed");
-			return -1;
+		int retry_count = 0;
+		bool created = false;
+		res = -1;
+		while (retry_count < MAX_START_RETRY) {
+			if (!created) {
+				res = create_container(runtime_entry, &key, &docker_name, uds_dir);
+			}
+			if (created || res == 0) {
+				created = true;
+				res = run_container(docker_name);
+				if (res == 0)
+					break;
+			}
+			retry_count++;
+			sleep(2);
 		}
-		request = (QeRequest*) palloc (sizeof(QeRequest));
-		request->pid = qe_pid;
-		request->conn = session_id;
-		request->ccnt = ccnt;
-		request->requestType = CREATE_SERVER;
-		request->server_pid = 0;
-		snprintf(request->containerId, sizeof(request->containerId), "%s", docker_name);
-		res = send_message(request);
-		if (res != 0)
-		{
-			elog(WARNING, "send start server message failure");
-		} else {
-			elog(LOG, "send start server message success");
-		}
-		res = plc_docker_start_container(docker_name);
-		if (res != 0) {
-			elog(WARNING, "start container failed");
-			return -1;
-		}
-		return 0;
+		return res;
 	}
 }
 
@@ -482,7 +547,7 @@ static int receive_message()
 		return -1;
 	}
 }
-static int update_containers_status()
+static int update_containers_status(bool inspect)
 {
     int entry_num = 0;
     int res = 0;
@@ -498,18 +563,28 @@ static int update_containers_status()
 
 	while ((container_entry = (ContainerEntry *) hash_seq_search(&scan)) != NULL) {
         if (!plcontainer_stand_alone_mode) {
-            res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
-            if (res < 0) {
-                entry_array[i++] = &(container_entry->key);
-                elog(LOG, "Failed to inspect container");
-                continue;
-            }
+			/* check process first */
             int res = kill(container_entry->key.qe_pid, 0);
-            if (res != 0 || strcmp(container_entry->status, "exited") == 0) {
-                elog(LOG, "delete container of session pid %d", container_entry->key.qe_pid);
-                plc_docker_delete_container(container_entry->containerId);
-                entry_array[i++] = &(container_entry->key);
+            if (res != 0 ) {
+                elog(LOG, "delete container %s of session pid %d", container_entry->containerId, container_entry->key.qe_pid);
+                res = plc_docker_delete_container(container_entry->containerId);
+				if (res == 0) {
+					entry_array[i++] = &(container_entry->key);
+				}
+				continue;
             }
+			if (inspect) {
+				res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
+				if (res < 0) {
+					entry_array[i++] = &(container_entry->key);
+					elog(LOG, "Failed to inspect container %s", container_entry->containerId);
+					continue;
+				}
+				if (strcmp(container_entry->status, "exited") == 0) {
+					plc_docker_delete_container(container_entry->containerId);
+					entry_array[i++] = &(container_entry->key);
+				}
+			}
         } else {
             if (kill(container_entry->key.qe_pid, 0) != 0) {
                 destroy_container(container_entry->key.qe_pid, container_entry->key.conn, container_entry->key.ccnt);

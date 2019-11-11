@@ -93,6 +93,11 @@ typedef struct ShmqBufferStatus
 	CoordinatorState state;
 } ShmqBufferStatus;
 
+typedef struct CoordinatorConstraint
+{
+	slock_t mutex;
+	int dockerCreating;
+} CoordinatorConstraint;
 
 #define	PLC_COORDINATOR_MAGIC_NUMBER 0x666fff88
 #define SHMQ_BUFFER_BLOCK_NUMBER 10000
