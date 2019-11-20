@@ -152,6 +152,7 @@ plc_initialize_coordinator(dsm_handle seg)
     snprintf(address, sizeof(address), "/tmp/.plcoordinator.%ld.unix.sock", (long)getpid());
     coordinator_shm->protocol = CO_PROTO_UNIX;
 	coordinator_docker_constraint = (CoordinatorConstraint*) top_palloc(sizeof(CoordinatorConstraint));
+	memset(coordinator_docker_constraint, 0, sizeof(CoordinatorConstraint));
     strcpy(coordinator_shm->address, address);
 
 	if (plc_refresh_container_config(false) != 0) {
