@@ -34,7 +34,7 @@ FILES = src/function_cache.c src/plcontainer.c  \
         src/common/comm_connectivity.c src/common/comm_messages.c src/common/comm_dummy_plc.c
 OBJS = $(foreach FILE,$(FILES),$(subst .c,.o,$(FILE)))
 		
-CXX_FILES=src/proto/client.cc src/proto/proto_utils.cc src/proto/plcontainer.pb.cc src/proto/plcontainer.grpc.pb.cc
+CXX_FILES=src/proto/client.cc src/proto/proto_utils.cc src/proto/plcontainer.pb.cc src/proto/plcontainer.grpc.pb.cc src/docker/docker_client.cc src/docker/plc_docker.cc
 OBJS += $(foreach FILE,$(CXX_FILES),$(subst .cc,.o,$(FILE)))
 
 PROTO_PREFIX=plcontainer
@@ -167,6 +167,22 @@ build-clients:
 clean-clients:
 	$(MAKE) -C $(SRCDIR)/rclient clean
 
+.PHONY: docker-dep
+docker-dep:
+	@if [ ! -d $(INCLUDE_DIR)/rapidjson ];\
+	then \
+		echo "rapidjson does not exist, fetching"; \
+		git clone --branch v1.1.0 --depth 1 https://github.com/Tencent/rapidjson.git; \
+		mv rapidjson/include/rapidjson $(INCLUDE_DIR)/rapidjson; \
+		rm -rf rapidjson; \
+	fi
+
+.PHONY: test-docker
+test-docker: docker-dep
+	$(CXX) $(CXXFLAGS) -c src/docker/docker_client.cc -o docker_client.o -g -O0 $(CXXFLAGS)
+	$(CXX) $(CXXFLAGS) -c tests/docker_client/docker_client_test.cc -o docker_client_test.o -g -O0 $(CXXFLAGS)
+	$(CXX) $(CXXFLAGS) -o tests/docker_client/test docker_client.o docker_client_test.o -g -O0 $(CXXFLAGS) -lcurl
+	rm docker_client.o docker_client_test.o
 .PHONY: clean-coverage
 clean-coverage:
 	rm -f `find . -name '*.gcda' -print`

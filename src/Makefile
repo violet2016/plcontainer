@@ -12,7 +12,7 @@ FILES = plc_coordinator.c containers.c message_fns.c plc_configuration.c \
         common/comm_dummy_plc.c common/comm_messages.c
 OBJS = $(foreach src,$(FILES),$(subst .c,.o,$(src)))
 
-CXX_FILES=proto/async_server.cc proto/client.cc proto/proto_utils.cc proto/plcontainer.pb.cc proto/plcontainer.grpc.pb.cc
+CXX_FILES=proto/async_server.cc proto/client.cc proto/proto_utils.cc proto/plcontainer.pb.cc proto/plcontainer.grpc.pb.cc docker/docker_client.cc docker/plc_docker.cc
 OBJS += $(foreach src,$(CXX_FILES),$(subst .cc,.o,$(src)))
 
 override SHLIB_LINK += $(shell pkg-config --libs json-c)
@@ -30,7 +30,7 @@ override SHLIB_LINK += -L/usr/local/lib -lprotobuf -lgrpc++\
            -lgrpc++_reflection\
            -ldl
 else
-override SHLIB_LINK += -L/usr/local/lib -lprotobuf -lgrpc++\
+override SHLIB_LINK += -L/usr/local/lib -lprotobuf -lgrpc++ -lgrpc -lgpr\
            -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed\
            -ldl
 endif

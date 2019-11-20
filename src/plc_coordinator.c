@@ -43,8 +43,6 @@
 #include "plc/plc_coordinator.h"
 #include "common/comm_shm.h"
 #include "common/messages/messages.h"
-#include "plc/plc_coordinator.h"
-
 #include "interface.h"
 
 PG_MODULE_MAGIC;
@@ -52,7 +50,9 @@ PG_MODULE_MAGIC;
 extern void _PG_init(void);
 extern void plc_coordinator_main(Datum datum);
 extern void plc_coordinator_aux_main(Datum datum);
-
+extern int PlcDocker_create(runtimeConfEntry *conf, char **name, char *uds_dir, int qe_pid, int session_id, int ccnt,int uid, int gid,int procid);
+extern int PlcDocker_start(char *id, char *msg);
+extern int PlcDocker_delete(const char **ids, int length, char* msg);
 // END OF PROTOTYPES.
 
 static volatile sig_atomic_t got_sigterm = false;
@@ -337,12 +337,15 @@ static int store_container_info(ContainerKey *key, pid_t server_pid, char* conta
 			elog(LOG, "previous server process exist %d", entry->stand_alone_pid);
 		}
 		if (entry->containerId[0] != '\0') {
-			elog(LOG, "previous container Id exist %s, will delete it", entry->containerId);
+			elog(LOG, "key %d previous container Id exist %s, will delete it", key->qe_pid, entry->containerId);
 			plc_docker_delete_container(entry->containerId);
 		}
 	}
 	entry->stand_alone_pid = server_pid;
+	entry->key.qe_pid = key->qe_pid;
+	entry->key.conn = key->conn;
 	snprintf(entry->containerId, sizeof(entry->containerId), "%s", container_id);
+	elog(LOG, "put key %p %d value %s into hash table", &(entry->key), entry->key.qe_pid, entry->containerId);
 	return 0;
 }
 
@@ -387,7 +390,8 @@ int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **
 		return -1;
 	}
 	SpinLockRelease(&coordinator_docker_constraint->mutex);
-	res = plc_docker_create_container(runtime_entry, docker_name, &uds_dir, key->qe_pid, key->conn, key->ccnt);
+
+	res = PlcDocker_create(runtime_entry, docker_name, uds_dir, key->qe_pid, key->conn, key->ccnt, getuid(), getgid(),MyProcPid);
 
 	if (res != 0) {
 		elog(WARNING, "create container failed");
@@ -406,9 +410,9 @@ int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **
 	res = send_message(request);
 	if (res != 0)
 	{
-		elog(WARNING, "send start server message failure");
+		elog(WARNING, "send start server message for %d--%s failure", key->qe_pid, *docker_name);
 	} else {
-		elog(LOG, "send start server message success");
+		elog(LOG, "send start server message for %d--%s success", key->qe_pid, *docker_name);
 	}
 	SpinLockAcquire(&coordinator_docker_constraint->mutex);
 	coordinator_docker_constraint->dockerCreating--;
@@ -456,30 +460,35 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 			return -1;
 		}
 		char *uds_dir = palloc(DEFAULT_STRING_BUFFER_SIZE);
+		*container_id = (char *) palloc(DEFAULT_STRING_BUFFER_SIZE);
 		sprintf(uds_dir,  "%s.%d.%d.%d.%d", UDS_PREFIX, qe_pid, session_id, ccnt, (int)getpid());
 		snprintf(*uds_address, DEFAULT_STRING_BUFFER_SIZE, "%s/%s", uds_dir, UDS_SHARED_FILE);
 		int retry_count = 0;
 		bool created = false;
 		res = -1;
 		gettimeofday(&create_start_time, NULL);
+		char *msg = (char *) palloc(DEFAULT_STRING_BUFFER_SIZE);
+		memset(msg, 0 ,DEFAULT_STRING_BUFFER_SIZE);
 		while (retry_count < MAX_START_RETRY) {
 			if (!created) {
 				res = create_container(runtime_entry, &key, container_id, uds_dir);
-				if (res == 0) {
-					gettimeofday(&create_end_time, NULL);
-				}
-			}
-			if (created || res == 0) {
+				
 				created = true;
-				res = run_container(*container_id);
-				if (res == 0) {
-					gettimeofday(&start_end_time, NULL);
-					break;
-				}
+				gettimeofday(&create_end_time, NULL);
+				
+			}
+
+			res = PlcDocker_start(*container_id, msg);
+			if (res == 0) {
+				gettimeofday(&start_end_time, NULL);
+				break;
+			} else {
+				elog(LOG, "failed to start %s: %s", *container_id, msg);
 			}
 			retry_count++;
 			sleep(2);
 		}
+		pfree(msg);
 		int create_cost_time_ms = 0;
 		int start_cost_time_ms = 0;
 		if (res == 0) {
@@ -515,10 +524,10 @@ int destroy_container(pid_t qe_pid, int session_id, int ccnt)
 		res = send_message(request);
 		if (res != 0)
 		{
-			elog(WARNING, "send destroy message failure");
+			elog(WARNING, "send destroy message for qe %d failure", qe_pid);
 			return -1;
 		} else {
-			elog(LOG, "send destroy message success");
+			elog(LOG, "send destroy message for qe %d success", qe_pid);
 			return 0;
 		}
 	}
@@ -543,26 +552,31 @@ static int receive_message()
 	shm_mq_result res;
 	Size nbytes;
 	void *data;
-
-	/* Receive does not need to be blocked */
-	res = shm_mq_receive(message_queue_handle, &nbytes, &data, true);
-
-	if (res == SHM_MQ_WOULD_BLOCK)
+	int result = 0;
+	for (;;)
 	{
-		return 0;
-	} else if (res == SHM_MQ_SUCCESS) {
-		if (nbytes == sizeof(QeRequest))
-		{
-			QeRequest *request;
+		/* Receive does not need to be blocked */
+		res = shm_mq_receive(message_queue_handle, &nbytes, &data, true);
 
-			request = (QeRequest*) data;
-			elog(LOG, "PLC coordinator: receive message %d.%d --- %s", request->pid, request->conn, request->containerId);
-			handle_request(request);
+		if (res == SHM_MQ_WOULD_BLOCK)
+		{
+			break;
+		} else if (res == SHM_MQ_SUCCESS) {
+			if (nbytes == sizeof(QeRequest))
+			{
+				QeRequest *request;
+
+				request = (QeRequest*) data;
+				elog(LOG, "PLC coordinator: receive message %d.%d --- %s", request->pid, request->conn, request->containerId);
+				handle_request(request);
+			}
+		} else {
+			elog(LOG, "PLC coordinator: mq res %d", res);
+			result = -1;
+			break;
 		}
-		return 0;
-	} else {
-		return -1;
 	}
+	return result;
 }
 static int update_containers_status(bool inspect)
 {
@@ -576,30 +590,36 @@ static int update_containers_status(bool inspect)
     HASH_SEQ_STATUS scan;
     ContainerEntry *container_entry = NULL;
     hash_seq_init(&scan, container_status_table);
-    ContainerKey **entry_array = palloc(entry_num * sizeof(ContainerKey *));
-
+	int entry_size = entry_num * sizeof(ContainerKey *);
+    ContainerKey **entry_array = palloc(entry_size);
+	memset(entry_array, 0, entry_size);
+	int delete_ids_size = entry_num * sizeof(char*);
+	char **delete_ids = palloc(delete_ids_size);
+	memset(delete_ids, 0, delete_ids_size);
 	while ((container_entry = (ContainerEntry *) hash_seq_search(&scan)) != NULL) {
+		elog(LOG, "check container entry %d %p", container_entry->key.qe_pid, &(container_entry->key));
         if (!plcontainer_stand_alone_mode) {
 			/* check process first */
             int res = kill(container_entry->key.qe_pid, 0);
             if (res != 0 ) {
-                elog(LOG, "delete container %s of session pid %d", container_entry->containerId, container_entry->key.qe_pid);
-                res = plc_docker_delete_container(container_entry->containerId);
-				if (res == 0) {
-					entry_array[i++] = &(container_entry->key);
-				}
+                elog(LOG, "delete container %s of pid %d session id %d ccnt %d", container_entry->containerId, container_entry->key.qe_pid, container_entry->key.conn, container_entry->key.ccnt);
+				entry_array[i] = &(container_entry->key);
+				delete_ids[i] = &(container_entry->containerId);
+				i++;
 				continue;
             }
+			
 			if (inspect) {
 				res = plc_docker_inspect_container(container_entry->containerId, &container_entry->status, PLC_INSPECT_STATUS);
 				if (res < 0) {
-					entry_array[i++] = &(container_entry->key);
 					elog(LOG, "Failed to inspect container %s", container_entry->containerId);
 					continue;
 				}
 				if (strcmp(container_entry->status, "exited") == 0) {
-					plc_docker_delete_container(container_entry->containerId);
-					entry_array[i++] = &(container_entry->key);
+					//plc_docker_delete_container(container_entry->containerId);
+					delete_ids[i] = &(container_entry->containerId);
+					entry_array[i] = &(container_entry->key);
+					i++;
 				}
 			}
         } else {
@@ -609,27 +629,39 @@ static int update_containers_status(bool inspect)
             }
         }
 	}
+	if (i > 0) {
+		char *msg = (char *) palloc(DEFAULT_STRING_BUFFER_SIZE);
+		memset(msg, 0 ,DEFAULT_STRING_BUFFER_SIZE);
+		int res = PlcDocker_delete((const char**)delete_ids, i, msg);
+		if (res < 0) {
+			elog(LOG, "delete failed %s", msg);
+		} else {
+			elog(LOG, "success delete %d containers", i);
+		}
+		pfree(msg);
+	}
 	for (int j = 0; j < i; j++) {
 		res = hash_search(container_status_table, entry_array[j], HASH_REMOVE, NULL);
 	}
+	pfree(entry_array);
+	pfree(delete_ids);
     return 0;
 }
 
 static int handle_request(QeRequest *req)
 {
 	int res = 0;
-	ContainerKey key;
-	key.conn = req->conn;
-	key.qe_pid = req->pid;
-	key.ccnt = req->ccnt;
-	ContainerEntry *entry = NULL;
+	ContainerKey* key = palloc(sizeof(ContainerKey));
+	key->conn = req->conn;
+	key->qe_pid = req->pid;
+	key->ccnt = req->ccnt;
 	bool found = false;
 	switch (req->requestType) {
 		case CREATE_SERVER:
-			store_container_info(&key, 0, req->containerId);
+			store_container_info(key, 0, req->containerId);
 			break;
 		case DESTROY_SERVER:
-			clear_container_info(&key);
+			clear_container_info(key);
 			break;
 		default:
 			break;

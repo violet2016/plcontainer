@@ -9,7 +9,7 @@
 #include <grpcpp/grpcpp.h>
 #include <grpc/support/log.h>
 #include "plcontainer.grpc.pb.h"
-
+#include "docker/docker_client.h"
 #include "interface.h"
 
 extern "C"

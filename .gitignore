@@ -4,5 +4,6 @@ cscope.*
 management/sql/plcontainer_install.sql
 management/sql/plcontainer_uninstall.sql
 src/common/config.h
+src/include/rapidjson
 *.d
 src/.*
