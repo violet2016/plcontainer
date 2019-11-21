@@ -427,12 +427,13 @@ int run_container(char *docker_name)
 	}
 	return 0;
 }
-int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccnt, char **uds_address, char **container_id)
+int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccnt, char **uds_address, char **container_id, char **log_msg)
 {
 	pid_t server_pid;
 	int res;
-
+	struct timeval create_start_time, create_end_time, start_end_time;
 	*uds_address = (char*) palloc(DEFAULT_STRING_BUFFER_SIZE);
+	*log_msg = (char*) palloc(MAX_LOG_LENGTH);
 	ContainerKey key;
 	key.conn = session_id;
 	key.qe_pid = qe_pid;
@@ -459,18 +460,33 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 		int retry_count = 0;
 		bool created = false;
 		res = -1;
+		gettimeofday(&create_start_time, NULL);
 		while (retry_count < MAX_START_RETRY) {
 			if (!created) {
 				res = create_container(runtime_entry, &key, container_id, uds_dir);
+				if (res == 0) {
+					gettimeofday(&create_end_time, NULL);
+				}
 			}
 			if (created || res == 0) {
 				created = true;
 				res = run_container(*container_id);
-				if (res == 0)
+				if (res == 0) {
+					gettimeofday(&start_end_time, NULL);
 					break;
+				}
 			}
 			retry_count++;
 			sleep(2);
+		}
+		int create_cost_time_ms = 0;
+		int start_cost_time_ms = 0;
+		if (res == 0) {
+			create_cost_time_ms = create_end_time.tv_sec * 1000 + create_end_time.tv_usec / 1000 
+						- create_start_time.tv_sec * 1000 - create_start_time.tv_usec / 1000;
+			start_cost_time_ms = start_end_time.tv_sec * 1000 + start_end_time.tv_usec / 1000 
+						- create_end_time.tv_sec * 1000 - create_end_time.tv_usec / 1000;
+			snprintf(*log_msg, MAX_LOG_LENGTH, "create cost: %d, start cost: %d, retry: %d", create_cost_time_ms, start_cost_time_ms, retry_count);
 		}
 		return res;
 	}

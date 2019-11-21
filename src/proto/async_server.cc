@@ -24,15 +24,18 @@ public:
             } else {
                 char *uds_address;
                 char *container_id;
-                ret = start_container(request_.runtime_id().c_str(), (pid_t)request_.qe_pid(), request_.session_id(), request_.command_count(), &uds_address, &container_id);
+                char *log_msg;
+                ret = start_container(request_.runtime_id().c_str(), (pid_t)request_.qe_pid(), request_.session_id(), request_.command_count(), &uds_address, &container_id, &log_msg);
                 if (ret == 0) {
                     response_.set_container_address(uds_address);
                     response_.set_container_id(container_id);
                 }
                 response_.set_status(ret);
+                response_.set_log_msg(log_msg);
                 responder_.Finish(response_, grpc::Status::OK, this);
                 pfree(uds_address);
                 pfree(container_id);
+                pfree(log_msg);
                 plc_elog(DEBUG1, "StartContainer request successfully. request:%s response:%s",
                         request_.DebugString().c_str(),
                         response_.DebugString().c_str());
