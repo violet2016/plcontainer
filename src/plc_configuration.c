@@ -482,15 +482,22 @@ static void release_runtime_configuration_table(HTAB *table) {
 	}
 	hash_destroy(table);
 }
-
+char* get_config_filename() {
+	char* filename = (char*) palloc(DEFAULT_STRING_BUFFER_SIZE);
+#ifdef PLC_PG
+	char data_directory[DEFAULT_STRING_BUFFER_SIZE];
+	char *env_str;
+	if ((env_str = getenv("PGDATA")) == NULL)
+		plc_elog (ERROR, "PGDATA is not set");
+	snprintf(data_directory, sizeof(data_directory), "%s", env_str );
+#endif
+	sprintf(filename, "%s/%s", data_directory, PLC_PROPERTIES_FILE);
+	return filename;
+}
 HTAB *load_runtime_configuration() {
 	xmlDoc* volatile doc = NULL;
 	HTAB *table;
-	char filename[DEFAULT_STRING_BUFFER_SIZE];
- #ifdef PLC_PG
-    char data_directory[DEFAULT_STRING_BUFFER_SIZE];
-	char *env_str;
- #endif  
+	char* filename = get_config_filename();
 	table = new_runtime_configuration_table();
 	if (!table) {
 		plc_elog(WARNING, "can't alloc HTAB for runtime_configuration");
@@ -502,14 +509,6 @@ HTAB *load_runtime_configuration() {
 	 * library used.
 	 */
 	LIBXML_TEST_VERSION
-
- #ifdef PLC_PG
-    if ((env_str = getenv("PGDATA")) == NULL)
-        plc_elog (ERROR, "PGDATA is not set");
-	snprintf(data_directory, sizeof(data_directory), "%s", env_str );
- #endif   
-	/* Parse the file and get the DOM */
-	sprintf(filename, "%s/%s", data_directory, PLC_PROPERTIES_FILE);
 
 	PG_TRY();
 	{

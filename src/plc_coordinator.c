@@ -7,6 +7,7 @@
 
 #include "postgres.h"
 #include <unistd.h>
+#include <sys/inotify.h>
 
 #include "access/tupdesc.h"
 #include "access/xact.h"
@@ -176,17 +177,82 @@ plc_initialize_coordinator(dsm_handle seg)
 	RegisterDynamicBackgroundWorker(&auxWorker, NULL);
 	return 0;
 }
+void handle_config_file_events(int fd, int wd)
+{
+	/* Some systems cannot read integer variables if they are not
+		properly aligned. On other systems, incorrect alignment may
+		decrease performance. Hence, the buffer used for reading from
+		the inotify file descriptor should have the same alignment as
+		struct inotify_event. */
+
+	char buf[4096]
+		__attribute__ ((aligned(__alignof__(struct inotify_event))));
+	const struct inotify_event *event;
+	int i;
+	ssize_t len;
+	char *ptr;
+
+	/* Loop while events can be read from inotify file descriptor. */
+
+	for (;;) {
+
+		/* Read some events. */
+
+		len = read(fd, buf, sizeof(buf));
+		if (len == -1 && errno != EAGAIN) {
+			elog(ERROR, "failed to read config file.");
+			return;
+		}
+
+		/* If the nonblocking read() found no events to read, then
+			it returns -1 with errno set to EAGAIN. In that case,
+			we exit the loop. */
+
+		if (len <= 0)
+			break;
+
+		/* Loop over all events in the buffer */
+
+		for (ptr = buf; ptr < buf + len;
+				ptr += sizeof(struct inotify_event) + event->len) {
+
+			event = (const struct inotify_event *) ptr;
+			if (event->mask & IN_CLOSE_WRITE) {
+				elog(LOG, "config file close write");
+				if (plc_refresh_container_config(false) != 0) {
+					if (runtime_conf_table == NULL) {
+						/* can't load runtime configuration */
+						elog(WARNING, "PL/container: can't refresh runtime configuration");
+					} else {
+						elog(WARNING, "PL/container: no runtime configuration changed");
+					}
+				} else {
+					elog(LOG, "PL/container: refresh runtime configuration");
+				}
+			}
+		}
+	}
+}
 
 void
 plc_coordinator_main(Datum datum)
 {
     int rc;
 	dsm_handle seg;
-
+	int configfd, configwd;
+	
     (void)datum;
     pqsignal(SIGTERM, plc_coordinator_sigterm);
     pqsignal(SIGHUP, plc_coordinator_sighup);
 	seg = shm_message_queue_sender_init();
+	configfd = inotify_init1(IN_NONBLOCK);
+	if (configfd < 0) {
+		elog(ERROR, "failed to do inotify_init");
+	}
+	char* configfile = get_config_filename();
+	elog(LOG, "config file is %s", configfile);
+	configwd = inotify_add_watch(configfd, configfile, IN_OPEN | IN_CLOSE | IN_MODIFY);
+	
     plc_initialize_coordinator(seg);
     BackgroundWorkerUnblockSignals();
 
@@ -210,7 +276,7 @@ plc_coordinator_main(Datum datum)
         rc = WaitLatch(&MyProc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 0);
         if (rc & WL_POSTMASTER_DEATH)
             break;
-
+        handle_config_file_events(configfd, configwd);
         if (process_request(server, TIMEOUT_SEC) < 0) {
             plc_elog(ERROR, "server process request error.");
         }
@@ -218,6 +284,7 @@ plc_coordinator_main(Datum datum)
         if (plcontainer_stand_alone_mode) {
             update_containers_status(false);
         }
+		
     }
 
     if (coordinator_shm->protocol != CO_PROTO_TCP)
@@ -597,7 +664,6 @@ static int update_containers_status(bool inspect)
 	char **delete_ids = palloc(delete_ids_size);
 	memset(delete_ids, 0, delete_ids_size);
 	while ((container_entry = (ContainerEntry *) hash_seq_search(&scan)) != NULL) {
-		elog(LOG, "check container entry %d %p", container_entry->key.qe_pid, &(container_entry->key));
         if (!plcontainer_stand_alone_mode) {
 			/* check process first */
             int res = kill(container_entry->key.qe_pid, 0);
