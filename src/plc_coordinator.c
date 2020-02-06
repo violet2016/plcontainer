@@ -695,7 +695,7 @@ static int update_containers_status(bool inspect)
             }
         }
 	}
-	if (i > 0) {
+	if (i > 0 && !plcontainer_stand_alone_mode) {
 		char *msg = (char *) palloc(DEFAULT_STRING_BUFFER_SIZE);
 		memset(msg, 0 ,DEFAULT_STRING_BUFFER_SIZE);
 		int res = PlcDocker_delete((const char**)delete_ids, i, msg);
