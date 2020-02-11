@@ -25,7 +25,7 @@ public:
                 char *uds_address;
                 char *container_id;
                 char *log_msg;
-                ret = start_container(request_.runtime_id().c_str(), (pid_t)request_.qe_pid(), request_.session_id(), request_.command_count(), &uds_address, &container_id, &log_msg);
+                ret = start_container(request_.runtime_id().c_str(), (pid_t)request_.qe_pid(), request_.session_id(), request_.command_count(), request_.dbid(), request_.ownername().c_str(), &uds_address, &container_id, &log_msg);
                 if (ret == 0) {
                     response_.set_container_address(uds_address);
                     response_.set_container_id(container_id);

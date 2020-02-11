@@ -60,6 +60,7 @@ PG_FUNCTION_INFO_V1(refresh_plcontainer_config);
 
 PG_FUNCTION_INFO_V1(show_plcontainer_config);
 
+PG_FUNCTION_INFO_V1(containers_summary);
 HTAB *runtime_conf_table = NULL;
 
 /* Function parses the container XML definition and fills the passed
@@ -592,6 +593,196 @@ refresh_plcontainer_config(PG_FUNCTION_ARGS) {
 	} else {
 		PG_RETURN_TEXT_P(cstring_to_text("error"));
 	}
+}
+
+
+Datum
+containers_summary(pg_attribute_unused() PG_FUNCTION_ARGS) {
+
+	FuncCallContext *funcctx;
+	int call_cntr;
+	int max_calls;
+	int res;
+	TupleDesc tupdesc;
+	AttInMetadata *attinmeta;
+	struct json_object *container_list = NULL;
+	char *json_result;
+	bool isFirstCall = true;
+	containerStatus *datums = NULL;
+
+	/* Init the container list in the first call and get the results back */
+	if (SRF_IS_FIRSTCALL()) {
+		MemoryContext oldcontext;
+		int arraylen;
+
+		/* create a function context for cross-call persistence */
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/* switch to memory context appropriate for multiple function calls */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		res = plc_docker_list_container(&json_result);
+		if (res < 0) {
+			plc_elog(ERROR, "Docker container list error");
+		}
+
+		/* no container running */
+		if (strcmp(json_result, "[]") == 0) {
+			funcctx->max_calls = 0;
+		}
+
+		container_list = json_tokener_parse(json_result);
+
+		if (container_list == NULL) {
+			plc_elog(ERROR, "Parse JSON object error, cannot get the containers summary");
+		}
+
+		arraylen = json_object_array_length(container_list);
+
+		struct json_object *containerObj = NULL;
+		struct json_object *containerStateObj = NULL;
+		int64_t containerMemoryUsage = 0;
+
+		struct json_object *statusObj = NULL;
+		const char *statusStr;
+		struct json_object *labelObj = NULL;
+		struct json_object *ownerObj = NULL;
+		const char *ownerStr;
+		const char *username;
+		struct json_object *dbidObj = NULL;
+		const char *dbidStr;
+		struct json_object *idObj = NULL;
+		const char *idStr;
+		char **ids = palloc(arraylen);
+		memset(ids, 0, arraylen);
+		int actualLen = 0;
+		int64_t *mem_usage = palloc(sizeof(int64_t)*arraylen);
+		datums = (containerStatus *)palloc(sizeof(containerStatus)*arraylen);
+		memset(datums, 0, sizeof(containerStatus)*arraylen);
+		for (int i = 0; i < arraylen; i++) {
+			containerObj = json_object_array_get_idx(container_list, i);
+			if (containerObj == NULL) {
+				plc_elog(ERROR, "Not a valid container.");
+			}
+
+			if (!json_object_object_get_ex(containerObj, "Status", &statusObj)) {
+				plc_elog(ERROR, "failed to get json \"Status\" field.");
+			}
+			statusStr = json_object_get_string(statusObj);
+			if (!json_object_object_get_ex(containerObj, "Labels", &labelObj)) {
+				plc_elog(ERROR, "failed to get json \"Labels\" field.");
+			}
+
+			if (!json_object_object_get_ex(labelObj, "owner", &ownerObj)) {
+				plc_elog(LOG, "failed to get json \"owner\" field. Maybe this container is not started by PL/Container");
+				continue;
+			}
+			ownerStr = json_object_get_string(ownerObj);
+			username = GetUserNameFromId(GetUserId());
+			if (strcmp(ownerStr, username) != 0 && superuser() == false) {
+				plc_elog(DEBUG1, "Current username %s (not super user) is not match conatiner owner %s, skip", username, ownerStr);
+				continue;
+			}
+
+			if (!json_object_object_get_ex(labelObj, "dbid", &dbidObj)) {
+				plc_elog(LOG, "failed to get json \"dbid\" field. Maybe this container is not started by PL/Container");
+				continue;
+			}
+			dbidStr = json_object_get_string(dbidObj);
+
+			if (!json_object_object_get_ex(containerObj, "Id", &idObj)) {
+				plc_elog(ERROR, "failed to get json \"Id\" field.");
+			}
+
+			idStr = json_object_get_string(idObj);
+			ids[actualLen] = idStr;
+			datums[actualLen].idStr = idStr;
+			datums[actualLen].statusStr = statusStr;
+			datums[actualLen].dbidStr = dbidStr;
+			datums[actualLen].ownerStr = ownerStr;
+			actualLen++;
+		}
+		funcctx->max_calls = (uint32_t) actualLen;
+		res = PlcDocker_stat(ids, actualLen, mem_usage);
+		if (res < 0) {
+			plc_elog(INFO, "Fail to get docker container state");
+		} else {
+			for (int i = 0; i < actualLen; i++)
+				datums[i].memUsage = mem_usage[i]/1024;
+		}
+		/*
+		 * prepare attribute metadata for next calls that generate the tuple
+		 */
+
+		tupdesc = CreateTemplateTupleDesc(5, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "SEGMENT_ID",
+		                   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "CONTAINER_ID",
+		                   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "UP_TIME",
+		                   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "OWNER",
+		                   TEXTOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 5, "MEMORY_USAGE(KB)",
+		                   TEXTOID, -1, 0);
+
+		attinmeta = TupleDescGetAttInMetadata(tupdesc);
+		funcctx->attinmeta = attinmeta;
+
+		MemoryContextSwitchTo(oldcontext);
+	} else {
+		isFirstCall = false;
+	}
+
+	funcctx = SRF_PERCALL_SETUP();
+
+	call_cntr = funcctx->call_cntr;
+	max_calls = funcctx->max_calls;
+	attinmeta = funcctx->attinmeta;
+
+	if (isFirstCall) {
+		funcctx->user_fctx = (void *) datums;
+	} else {
+		datums = (json_object *) funcctx->user_fctx;
+	}
+	/*if a record is not suitable, skip it and scan next record*/
+	while (1) {
+		/* send one tuple */
+		if (call_cntr < max_calls) {
+			char **values;
+			HeapTuple tuple;
+			Datum result;
+			int res;
+			char *containerState = NULL;
+			struct json_object *memoryObj = NULL;
+			struct json_object *memoryUsageObj = NULL;
+			values = (char **) palloc(5 * sizeof(char *));
+			values[0] = (char *) palloc(8 * sizeof(char));
+			values[1] = (char *) palloc(80 * sizeof(char));
+			values[2] = (char *) palloc(64 * sizeof(char));
+			values[3] = (char *) palloc(64 * sizeof(char));
+			values[4] = (char *) palloc(32 * sizeof(char));
+
+			snprintf(values[0], 8, "%s", datums[call_cntr].dbidStr);
+			snprintf(values[1], 80, "%s", datums[call_cntr].idStr);
+			snprintf(values[2], 64, "%s", datums[call_cntr].statusStr);
+			snprintf(values[3], 64, "%s", datums[call_cntr].ownerStr);
+			snprintf(values[4], 32, "%ld", datums[call_cntr].memUsage);
+
+			/* build a tuple */
+			tuple = BuildTupleFromCStrings(attinmeta, values);
+
+			/* make the tuple into a datum */
+			result = HeapTupleGetDatum(tuple);
+			SRF_RETURN_NEXT(funcctx, result);
+		} else {
+			if (container_list != NULL) {
+				json_object_put(container_list);
+			}
+			SRF_RETURN_DONE(funcctx);
+		}
+	}
+
 }
 
 /*

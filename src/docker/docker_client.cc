@@ -22,6 +22,20 @@ JSON_DOC Docker::inspect_containers(const std::vector<std::string>& container_id
     return requestAndParseJson(GET,paths, param);
 }
 
+JSON_DOC Docker::list_containers(JSON_DOC& filters, bool all, int limit, const std::string& since, const std::string& before, int size) {
+    std::string path = "/containers/json?";
+    path += param("all", all);
+    path += param("limit", limit);
+    path += param("since", since);
+    path += param("before", before);
+    path += param("size", size);
+    path += param("filters", filters);
+    JSON_DOC param = JSON_DOC();
+    std::vector<std::string> paths;
+    paths.push_back(path);
+    return requestAndParseJson(GET, paths, param, 2);
+}
+
 JSON_DOC Docker::create_container(JSON_DOC& parameters){
     std::vector<std::string> paths;
     std::string path = "/containers/create";
@@ -53,7 +67,18 @@ JSON_DOC Docker::delete_containers(const std::vector<std::string>& container_ids
     JSON_DOC param = JSON_DOC();
     return requestAndParse(DELETE,paths,param, 204);
 }
-
+JSON_DOC Docker::stat_containers(const std::vector<std::string>& container_ids, bool is_stream) {
+    std::vector<std::string> paths;
+    for (unsigned int i  = 0; i < container_ids.size(); i++) {
+        if (container_ids[i].length() == 0)
+            continue;
+        std::string path = "/containers/" + container_ids[i] + "/stats?";
+        path += param("stream", is_stream);
+        paths.push_back(path);
+    }
+    JSON_DOC param = JSON_DOC();
+    return requestAndParse(GET,paths,param);
+}
 int Docker::multiCurlRequests(std::string& readBuffer, const std::vector<std::string>& paths, JSON_DOC& param, std::string method_str) {
     curlm = curl_multi_init();
     std::vector<CURL *> handles;

@@ -51,9 +51,10 @@ PG_MODULE_MAGIC;
 extern void _PG_init(void);
 extern void plc_coordinator_main(Datum datum);
 extern void plc_coordinator_aux_main(Datum datum);
-extern int PlcDocker_create(runtimeConfEntry *conf, char **name, char *uds_dir, int qe_pid, int session_id, int ccnt,int uid, int gid,int procid);
+extern int PlcDocker_create(runtimeConfEntry *conf, char **name, char *uds_dir, int qe_pid, int session_id, int ccnt,int uid, int gid,int procid, char* dbname, char *ownername);
 extern int PlcDocker_start(char *id, char *msg);
 extern int PlcDocker_delete(const char **ids, int length, char* msg);
+extern int PlcDocker_stat(const char** ids, int length, int64_t *mem_usage);
 // END OF PROTOTYPES.
 
 static volatile sig_atomic_t got_sigterm = false;
@@ -445,7 +446,7 @@ static int clear_container_info(ContainerKey *key)
 	return res;
 }
 
-int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **docker_name, char *uds_dir)
+int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **docker_name, char *uds_dir, int dbid, char *ownername)
 {
 	int res = 0;
 	SpinLockAcquire(&coordinator_docker_constraint->mutex);
@@ -458,7 +459,7 @@ int create_container(runtimeConfEntry *runtime_entry, ContainerKey *key, char **
 	}
 	SpinLockRelease(&coordinator_docker_constraint->mutex);
 
-	res = PlcDocker_create(runtime_entry, docker_name, uds_dir, key->qe_pid, key->conn, key->ccnt, getuid(), getgid(),MyProcPid);
+	res = PlcDocker_create(runtime_entry, docker_name, uds_dir, key->qe_pid, key->conn, key->ccnt, getuid(), getgid(),MyProcPid, dbid, ownername);
 
 	if (res != 0) {
 		elog(WARNING, "create container failed");
@@ -498,7 +499,7 @@ int run_container(char *docker_name)
 	}
 	return 0;
 }
-int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccnt, char **uds_address, char **container_id, char **log_msg)
+int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccnt, int dbid, const char *ownername, char **uds_address, char **container_id, char **log_msg)
 {
 	pid_t server_pid;
 	int res;
@@ -538,7 +539,7 @@ int start_container(const char *runtimeid, pid_t qe_pid, int session_id, int ccn
 		memset(msg, 0 ,DEFAULT_STRING_BUFFER_SIZE);
 		while (retry_count < MAX_START_RETRY) {
 			if (!created) {
-				res = create_container(runtime_entry, &key, container_id, uds_dir);
+				res = create_container(runtime_entry, &key, container_id, uds_dir,dbid, ownername);
 				
 				created = true;
 				gettimeofday(&create_end_time, NULL);

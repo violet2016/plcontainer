@@ -30,7 +30,24 @@ int main() {
     /* delete containers */
 
     std::string container_id2 = doc["data"]["Id"].GetString();
+    JSON_DOC filter = JSON_DOC();
+    doc = client.list_containers(filter);
+    std::cout << "list" << jsonToString(doc) << std::endl;
     container_ids.push_back(container_id2);
+    doc = client.stat_containers(container_ids);
+    JSON_DOC stat;
+    std::string stat_string = doc["data"].GetString();
+    std::string delimiter = "\n";
+
+    size_t pos = 0;
+    std::string token;
+    while ((pos = stat_string.find(delimiter)) != std::string::npos) {
+        token = stat_string.substr(0, pos);
+        stat.Parse(token);
+        std::cout << "stat is " << jsonToString(stat["memory_stats"]) << std::endl;
+        stat_string.erase(0, pos + delimiter.length());
+    }
+
     std::cout << "delete "<< container_ids.size()<< " containers" << std::endl;
     JSON_DOC delete_res;
     delete_res = client.delete_containers(container_ids);

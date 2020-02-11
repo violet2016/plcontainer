@@ -482,17 +482,23 @@ int get_new_container_from_coordinator(const char *runtime_id, plcContext *ctx) 
     (void) runtime_id;
     StartContainerRequest   request;
     StartContainerResponse  response;
-
+    const char *username;
     plcContextBeginStage(ctx, "request_coordinator_for_container", NULL);
-
+    int dbid;
+#ifndef PLC_PG
+	dbid = (int)GpIdentity.dbid;
+#endif
     std::string server_addr = get_coordinator_address();
     PLCoordinatorClient     client(grpc::CreateChannel(
       "unix://"+server_addr, grpc::InsecureChannelCredentials()));
 
+    username = GetUserNameFromId(GetUserId());
     request.set_runtime_id(runtime_id);
     request.set_qe_pid(getpid());
     request.set_session_id(gp_session_id);
     request.set_command_count(gp_command_count);
+    request.set_ownername(username);
+    request.set_dbid(dbid);
     client.StartContainer(request, response);
 
     plcContextEndStage(ctx, "request_coordinator_for_container",

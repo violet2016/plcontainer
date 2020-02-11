@@ -16,6 +16,8 @@ message StartContainerRequest {
     int32   qe_pid = 2;
     int32   session_id = 3;
     int32   command_count = 4;
+    string  ownername = 5;
+    int32  dbid = 6;
 }
 
 message StartContainerResponse {

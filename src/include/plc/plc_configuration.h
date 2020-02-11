@@ -26,6 +26,7 @@ Datum refresh_plcontainer_config(PG_FUNCTION_ARGS);
 
 Datum show_plcontainer_config(PG_FUNCTION_ARGS);
 
+Datum containers_summary(PG_FUNCTION_ARGS);
 runtimeConfEntry *plc_get_runtime_configuration(const char *id);
 
 char* get_config_filename();
@@ -39,5 +40,11 @@ int plc_refresh_container_config(bool verbose);
 char *get_sharing_options(runtimeConfEntry *conf, bool *has_error, char **uds_dir);
 
 extern HTAB *runtime_conf_table;
-
+typedef struct {
+    char *idStr;
+    char *statusStr;
+    char *ownerStr;
+    char *dbidStr;
+    int64_t memUsage;
+} containerStatus;
 #endif /* PLC_CONFIGURATION_H */

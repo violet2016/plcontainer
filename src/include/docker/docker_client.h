@@ -59,7 +59,7 @@ class Docker{
         JSON_DOC pause_container(const std::string& container_id);
         JSON_DOC wait_container(const std::string& container_id);
         JSON_DOC delete_containers(const std::vector<std::string>& container_ids, bool v=true, bool force=true);
-
+        JSON_DOC stat_containers(const std::vector<std::string>& container_ids, bool is_stream = false);
     private:
         std::string host_uri;
         bool is_multi;

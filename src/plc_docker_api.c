@@ -465,7 +465,7 @@ int plc_docker_delete_container(const char *name) {
 
 int plc_docker_list_container(char **result) {
 	plcCurlBuffer *response = NULL;
-	char *method = "/containers/json?all=1&label=\"dbid=%d\"";
+	char *method = "/containers/json?all=1&label=\"dbid=%d\"&label=\"plcontainer=true\"";
 	char *url = NULL;
 	int res = 0;
 	int16 dbid = 0;
@@ -475,7 +475,7 @@ int plc_docker_list_container(char **result) {
 	dbid = GpIdentity.dbid;
 #endif			 
 
-	sprintf(url, method, dbid); 
+	sprintf(url, method, dbid);
 	response = plcCurlRESTAPICall(PLC_HTTP_GET, url, NULL);
 	res = response->status;
 

@@ -37,3 +37,7 @@ CREATE OR REPLACE VIEW plcontainer_refresh_config as
             ) as segments
     union all
     select -1, plcontainer_refresh_local_config(false);
+
+CREATE OR REPLACE FUNCTION plcontainer_containers_summary() RETURNS setof container_summary_type
+AS '$libdir/plcontainer', 'containers_summary'
+LANGUAGE C VOLATILE;
