@@ -133,7 +133,8 @@ test=# select * from employee;
  mary | 205000 |  35
 (2 rows)
 
-test=# select overpaid(emp) from employee emp;                                   overpaid
+test=# select overpaid(emp) from employee emp;
+ overpaid
 ----------
  f
  t
@@ -161,8 +162,9 @@ AS $$
 $$ LANGUAGE plcontainer;
 ```
 
-```
-test=# select overpaid(emp) from employee emp;                                     overpaid
+```bash
+test=# select overpaid(emp) from employee emp;
+   overpaid
 ---------------
 
  (mary,205000)
