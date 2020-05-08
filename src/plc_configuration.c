@@ -703,7 +703,12 @@ containers_summary(pg_attribute_unused() PG_FUNCTION_ARGS) {
 			actualLen++;
 		}
 		funcctx->max_calls = (uint32_t) actualLen;
+#ifndef PL4K
 		res = PlcDocker_stat(ids, actualLen, mem_usage);
+#else
+		plc_elog(ERROR, "PlcDocker_stat is not supported in PL4K mode");
+		res = -2;
+#endif
 		if (res < 0) {
 			plc_elog(INFO, "Fail to get docker container state");
 		} else {

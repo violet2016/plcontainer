@@ -53,6 +53,9 @@ ifeq ($(PLC_PG),yes)
 #	override CFLAGS += -DPLC_PG  -Wno-sign-compare
 endif
 
+ifeq ($(PL4K),yes)
+	override CFLAGS += -DPL4K
+endif
 # FIXME: We might need a configure script to handle below checks later.
 # See https://github.com/greenplum-db/plcontainer/issues/322
 
@@ -105,10 +108,13 @@ endif
 
 all: proto coordinator all-lib
 	@echo "Build PL/Container Done."
+pl4k: proto all-lib
+	@echo "Build PL4KPL/Container Done."
+
 
 
 install: all install-coordinator installdirs install-lib install-extra install-clients
-
+installpl4k: pl4k installdirs install-lib install-extra install-clients
 clean: clean-clients clean-coverage clean-proto
 distclean: distclean-config
 
@@ -135,7 +141,7 @@ proto:
 	$(PROTOC) -I src --cpp_out=src/proto $(PROTO_FILE)
 	mv src/proto/$(PROTO_PREFIX).pb.h src/include/proto/	
 	mv src/proto/$(PROTO_PREFIX).grpc.pb.h src/include/proto/	
-
+	@echo "Finish protobuf and grpc."
 .PHONY: clean-proto
 clean-proto:
 	rm -f src/include/proto/$(PROTO_PREFIX).pb.h 

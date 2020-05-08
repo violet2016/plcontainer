@@ -74,8 +74,9 @@ CoordinatorConstraint *coordinator_docker_constraint;
 bool plcontainer_stand_alone_mode = true;
 int plc_max_docker_creating_num = 3;
 char *plcontainer_stand_alone_server_path;
+#ifndef PL4K
 int plc_client_timeout = -1;
-
+#endif
 static int send_message(QeRequest *request);
 static int receive_message();
 static int handle_request(QeRequest *req);
@@ -380,6 +381,7 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+#ifndef PL4K
 	DefineCustomIntVariable("plcontainer.plc_client_timeout",
 							"The plcontainer client timeout for function call",
 							NULL,
@@ -390,6 +392,7 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+#endif
 
     worker.bgw_flags = BGWORKER_SHMEM_ACCESS;
     worker.bgw_start_time = BgWorkerStart_RecoveryFinished;

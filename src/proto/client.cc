@@ -15,12 +15,16 @@ PLContainerClient *PLContainerClient::GetPLContainerClient() {
     return client;
 }
 
+#ifdef PL4K
+std::string get_pl4k_service_address() {
+    return std::string(plcontainer_service_address);
+}
+#endif
 void PLContainerClient::Init(const plcContext *ctx) {
     this->ctx = ctx;
 
     if (ctx->is_new_ctx) {
         std::string uds(ctx->service_address);
-        uds = "unix://" + uds;
         this->stub_ = PLContainer::NewStub(grpc::CreateChannel(uds, grpc::InsecureChannelCredentials()));
     }
 }
@@ -561,11 +565,11 @@ Datum plcontainer_function_handler(FunctionCallInfo fcinfo, plcProcInfo *proc, M
         if (fcinfo->flinfo->fn_retset && funcctx->user_fctx != NULL) {
             funcctx->user_fctx = NULL;
         }
-       
+
         if (response) {
             delete response;
         }
- 
+
         MemoryContextSwitchTo(oldcontext);
         PG_RE_THROW();
     }
@@ -601,7 +605,7 @@ void plcontainer_inline_function_handler(FunctionCallInfo fcinfo, MemoryContext 
         oldcontext = MemoryContextSwitchTo(function_cxt);
         runtime_id = parse_container_meta(icb->source_text);
         ctx = get_container_context(runtime_id);
-       
+
         client = PLContainerClient::GetPLContainerClient(); 
         client->Init(ctx);
         client->InitCallRequest(fcinfo, R, request);
@@ -633,10 +637,6 @@ int get_new_container_from_coordinator(const char *runtime_id, plcContext *ctx) 
 #ifndef PLC_PG
 	dbid = (int)GpIdentity.dbid;
 #endif
-    std::string server_addr = get_coordinator_address();
-    PLCoordinatorClient     client(grpc::CreateChannel(
-      "unix://"+server_addr, grpc::InsecureChannelCredentials()));
-
     username = GetUserNameFromId(GetUserId());
     request.set_runtime_id(runtime_id);
     request.set_qe_pid(getpid());
@@ -644,8 +644,11 @@ int get_new_container_from_coordinator(const char *runtime_id, plcContext *ctx) 
     request.set_command_count(gp_command_count);
     request.set_ownername(username);
     request.set_dbid(dbid);
+#ifndef PL4K
+    std::string server_addr = get_coordinator_address();
+    PLCoordinatorClient     client(grpc::CreateChannel(
+        "unix://"+server_addr, grpc::InsecureChannelCredentials()));
     client.StartContainer(request, response);
-
     plcContextEndStage(ctx, "request_coordinator_for_container",
                     response.status() == 0 ? PLC_CONTEXT_STAGE_SUCCESS : PLC_CONTEXT_STAGE_FAIL,
                     "[REQUEST]:%s, [RESPONSE]:%s", request.DebugString().c_str(), response.DebugString().c_str());
@@ -653,8 +656,14 @@ int get_new_container_from_coordinator(const char *runtime_id, plcContext *ctx) 
     if (response.status() != 0) {
         return -1;
     }
-    ctx->service_address = plc_top_strdup(response.container_address().c_str());
+    ctx->service_address = plc_top_strdup(("unix://"+response.container_address()).c_str());
     ctx->container_id = plc_top_strdup(response.container_id().c_str());
+#else
+    std::string server_addr = get_pl4k_service_address();
+    ctx->service_address = plc_top_strdup(server_addr.c_str());
+    ctx->container_id = plc_top_strdup("");
+#endif
+
     return 0;
 }
 

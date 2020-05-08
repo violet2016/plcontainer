@@ -62,7 +62,10 @@ static plcProcInfo *PLy_curr_procedure = NULL;
 
 /* this is saved and restored by plcontainer_call_handler */
 MemoryContext pl_container_caller_context = NULL;
-
+char *plcontainer_service_address;
+#ifdef PL4K
+int plc_client_timeout = -1;
+#endif
 void _PG_init(void);
 
 /*
@@ -72,6 +75,29 @@ void _PG_init(void);
  */
 void
 _PG_init(void) {
+#ifdef PL4K
+	DefineCustomStringVariable("plcontainer.service_address",
+							   "Set the address of the pl4k service",
+							   NULL,
+							   &plcontainer_service_address,
+							   "none",
+							   PGC_SIGHUP,
+							   0,
+							   NULL,
+							   NULL,
+							   NULL);
+	DefineCustomIntVariable("plcontainer.plc_client_timeout",
+							"The plcontainer client timeout for function call",
+							NULL,
+							&plc_client_timeout,
+							60, -1, 3600,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+	plc_elog(DEBUG1, "PL/Container initialize with address %s", plcontainer_service_address);
+#endif
 	/* Be sure we do initialization only once (should be redundant now) */
 	static bool inited = false;
 	if (inited)

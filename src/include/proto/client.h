@@ -30,6 +30,7 @@ extern "C"
 #include "cdb/cdbvars.h"
 
 extern int plc_client_timeout;
+extern char *plcontainer_service_address;
 }
 
 using namespace plcontainer;
